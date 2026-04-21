@@ -47,13 +47,79 @@ def agent_card():
     }
 
 # ─── MCP Endpoints ────────────────────────────────────────
+API_KEYS = {
+    os.getenv("AGENT_API_KEY")
+}
+
+def verify_api_key(x_api_key: str | None):
+    if not x_api_key or x_api_key not in API_KEYS:
+        raise HTTPException(status_code=401, detail="Invalid API Key")
+
+
 @app.get("/mcp")
-def mcp_info(x_api_key: Optional[str] = Header(None)):
-    # Accept any key for now, just needs to not crash
+def mcp_info(x_api_key: str | None = Header(None)):
+    verify_api_key(x_api_key)
+
     return {
         "name": "Discharge Intelligence MCP",
         "version": "1.0.0",
         "tools": MCP_TOOLS
+    }
+
+
+@app.post("/mcp")
+async def mcp_post(request: Request, x_api_key: str | None = Header(None)):
+    verify_api_key(x_api_key)
+
+    """
+    Prompt Opinion sends POST to /mcp to discover tools
+    and to invoke them. Handle both cases.
+    """
+    body = await request.json()
+
+    # Tool discovery request
+    method = body.get("method", "")
+
+    if method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": body.get("id"),
+            "result": {
+                "tools": MCP_TOOLS
+            }
+        }
+
+    # Tool call request
+    if method == "tools/call":
+        params = body.get("params", {})
+        tool_name = params.get("name", "")
+        arguments = params.get("arguments", {})
+
+        patient_id = arguments.get("patient_id", "")
+        fhir_token = arguments.get("fhir_token", "")
+
+        result = await call_tool(tool_name, patient_id, fhir_token)
+
+        return {
+            "jsonrpc": "2.0",
+            "id": body.get("id"),
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": str(result)
+                    }
+                ]
+            }
+        }
+
+    # Default — return tools list
+    return {
+        "jsonrpc": "2.0",
+        "id": body.get("id"),
+        "result": {
+            "tools": MCP_TOOLS
+        }
     }
 
 @app.post("/mcp/tools/{tool_name}")
