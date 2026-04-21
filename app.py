@@ -1,5 +1,6 @@
 import json
 import os
+from typing import Any
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Request
@@ -22,6 +23,15 @@ app.add_middleware(
 
 SUPPORTED_PROTOCOL_VERSION = os.getenv("MCP_PROTOCOL_VERSION", "2025-11-25")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:7860")
+
+# Keep FHIR-context declarations enabled by default so PromptOpinion can
+# display the consent UI and pass FHIR context into the agent.
+REQUIRE_FHIR_CONTEXT = os.getenv("REQUIRE_FHIR_CONTEXT", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 MCP_TOOLS = [
     {
@@ -132,7 +142,7 @@ def tool_result_to_text(result) -> str:
     return json.dumps(result, ensure_ascii=False, default=str, indent=2)
 
 
-def build_agent_card() -> dict:
+def build_agent_card() -> dict[str, Any]:
     return {
         "name": "Discharge Readiness Orchestrator",
         "description": (
@@ -141,11 +151,11 @@ def build_agent_card() -> dict:
             "discharge, needs a discharge assessment, or wants to know "
             "what is blocking a patient's discharge."
         ),
-        "url": PUBLIC_URL,
         "version": "1.0.0",
+        "url": PUBLIC_URL,
         "supportedInterfaces": [
             {
-                "url": f"{PUBLIC_URL}/mcp",
+                "url": f"{PUBLIC_URL}/agents/orchestrator",
                 "protocolBinding": "HTTP+JSON",
                 "protocolVersion": "1.0",
             }
@@ -154,10 +164,27 @@ def build_agent_card() -> dict:
             "streaming": False,
             "pushNotifications": False,
             "extendedAgentCard": False,
-            "extensions": [],
+            "extensions": [
+                {
+                    "uri": "ai.promptopinion/fhir-context",
+                    "description": (
+                        "Allows PromptOpinion to pass FHIR server URL, access token, "
+                        "and patient ID to this agent."
+                    ),
+                    "required": REQUIRE_FHIR_CONTEXT,
+                }
+            ],
         },
         "defaultInputModes": ["application/json", "text/plain"],
         "defaultOutputModes": ["application/json", "text/plain"],
+        "securitySchemes": {
+            "apiKeyAuth": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-API-Key",
+            }
+        },
+        "security": [{"apiKeyAuth": []}],
         "skills": [
             {
                 "id": "assess_discharge_readiness",
@@ -180,16 +207,30 @@ def build_agent_card() -> dict:
     }
 
 
-@app.get("/.well-known/agent.json")
-def agent_card():
-    return build_agent_card()
+def extract_fhir_context_from_headers(
+    x_patient_id: str | None,
+    x_fhir_access_token: str | None,
+    x_fhir_server_url: str | None,
+    x_fhir_refresh_token: str | None,
+    x_fhir_refresh_url: str | None,
+) -> dict[str, str]:
+    context: dict[str, str] = {}
+
+    if x_patient_id:
+        context["patient_id"] = x_patient_id
+    if x_fhir_access_token:
+        context["fhir_token"] = x_fhir_access_token
+    if x_fhir_server_url:
+        context["fhir_server_url"] = x_fhir_server_url
+    if x_fhir_refresh_token:
+        context["fhir_refresh_token"] = x_fhir_refresh_token
+    if x_fhir_refresh_url:
+        context["fhir_refresh_url"] = x_fhir_refresh_url
+
+    return context
 
 
-@app.get("/.well-known/agent-card.json")
-def agent_card_compat():
-    return build_agent_card()
-
-def build_mcp_initialize_result(requested_protocol_version: str | None) -> dict:
+def build_mcp_initialize_result(requested_protocol_version: str | None) -> dict[str, Any]:
     negotiated_version = SUPPORTED_PROTOCOL_VERSION
     if requested_protocol_version == SUPPORTED_PROTOCOL_VERSION:
         negotiated_version = requested_protocol_version
@@ -233,6 +274,16 @@ def build_mcp_initialize_result(requested_protocol_version: str | None) -> dict:
     }
 
 
+# ─── Agent Card ───────────────────────────────────────────
+@app.get("/.well-known/agent.json")
+def agent_card():
+    return build_agent_card()
+
+
+@app.get("/.well-known/agent-card.json")
+def agent_card_compat():
+    return build_agent_card()
+
 
 # ─── MCP Endpoints ────────────────────────────────────────
 @app.get("/mcp")
@@ -249,6 +300,11 @@ def mcp_info(x_api_key: str | None = Header(default=None, alias="X-API-Key")):
 async def mcp_post(
     request: Request,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    x_patient_id: str | None = Header(default=None, alias="X-Patient-ID"),
+    x_fhir_server_url: str | None = Header(default=None, alias="X-FHIR-Server-URL"),
+    x_fhir_access_token: str | None = Header(default=None, alias="X-FHIR-Access-Token"),
+    x_fhir_refresh_token: str | None = Header(default=None, alias="X-FHIR-Refresh-Token"),
+    x_fhir_refresh_url: str | None = Header(default=None, alias="X-FHIR-Refresh-Url"),
 ):
     verify_api_key(x_api_key)
 
@@ -264,10 +320,19 @@ async def mcp_post(
 
     method = body.get("method", "")
     request_id = body.get("id")
+    params = body.get("params", {}) if isinstance(body.get("params", {}), dict) else {}
+
+    # FHIR context can arrive either from PromptOpinion headers or from the JSON body.
+    header_context = extract_fhir_context_from_headers(
+        x_patient_id=x_patient_id,
+        x_fhir_access_token=x_fhir_access_token,
+        x_fhir_server_url=x_fhir_server_url,
+        x_fhir_refresh_token=x_fhir_refresh_token,
+        x_fhir_refresh_url=x_fhir_refresh_url,
+    )
 
     # ─── Initialize handshake ─────────────────────────────
     if method == "initialize":
-        params = body.get("params", {})
         requested_protocol_version = params.get("protocolVersion")
         return {
             "jsonrpc": "2.0",
@@ -291,9 +356,10 @@ async def mcp_post(
 
     # ─── Tool call ────────────────────────────────────────
     if method == "tools/call":
-        params = body.get("params", {})
         tool_name = params.get("name", "")
         arguments = params.get("arguments", {})
+        if not isinstance(arguments, dict):
+            arguments = {}
 
         if tool_name not in MCP_TOOL_NAMES:
             return jsonrpc_error(
@@ -302,8 +368,16 @@ async def mcp_post(
                 f"Unknown tool: {tool_name}",
             )
 
-        patient_id = arguments.get("patient_id", "")
-        fhir_token = arguments.get("fhir_token", "")
+        patient_id = (
+            arguments.get("patient_id")
+            or header_context.get("patient_id")
+            or ""
+        )
+        fhir_token = (
+            arguments.get("fhir_token")
+            or header_context.get("fhir_token")
+            or ""
+        )
 
         if not patient_id or not fhir_token:
             return jsonrpc_error(
@@ -350,6 +424,11 @@ async def mcp_tool_call(
     tool_name: str,
     request: Request,
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    x_patient_id: str | None = Header(default=None, alias="X-Patient-ID"),
+    x_fhir_server_url: str | None = Header(default=None, alias="X-FHIR-Server-URL"),
+    x_fhir_access_token: str | None = Header(default=None, alias="X-FHIR-Access-Token"),
+    x_fhir_refresh_token: str | None = Header(default=None, alias="X-FHIR-Refresh-Token"),
+    x_fhir_refresh_url: str | None = Header(default=None, alias="X-FHIR-Refresh-Url"),
 ):
     verify_api_key(x_api_key)
 
@@ -364,8 +443,16 @@ async def mcp_tool_call(
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    patient_id = body.get("patient_id")
-    fhir_token = body.get("fhir_token")
+    header_context = extract_fhir_context_from_headers(
+        x_patient_id=x_patient_id,
+        x_fhir_access_token=x_fhir_access_token,
+        x_fhir_server_url=x_fhir_server_url,
+        x_fhir_refresh_token=x_fhir_refresh_token,
+        x_fhir_refresh_url=x_fhir_refresh_url,
+    )
+
+    patient_id = body.get("patient_id") or header_context.get("patient_id")
+    fhir_token = body.get("fhir_token") or header_context.get("fhir_token")
 
     if not patient_id or not fhir_token:
         raise HTTPException(
@@ -382,7 +469,19 @@ async def mcp_tool_call(
 
 # ─── Agent Endpoints ──────────────────────────────────────
 @app.post("/agents/orchestrator")
-async def orchestrator_endpoint(request: Request):
+async def orchestrator_endpoint(
+    request: Request,
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+    x_patient_id: str | None = Header(default=None, alias="X-Patient-ID"),
+    x_fhir_server_url: str | None = Header(default=None, alias="X-FHIR-Server-URL"),
+    x_fhir_access_token: str | None = Header(default=None, alias="X-FHIR-Access-Token"),
+    x_fhir_refresh_token: str | None = Header(default=None, alias="X-FHIR-Refresh-Token"),
+    x_fhir_refresh_url: str | None = Header(default=None, alias="X-FHIR-Refresh-Url"),
+):
+    expected_key = os.getenv("AGENT_API_KEY") or os.getenv("AGENT_API_KEY_PROD")
+    if not expected_key or x_api_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
     try:
         body = await request.json()
     except Exception:
@@ -391,13 +490,22 @@ async def orchestrator_endpoint(request: Request):
     if not isinstance(body, dict):
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
-    message = body.get("message", "")
-    context = body.get("context", {})
-    if not isinstance(context, dict):
-        context = {}
+    body_context = body.get("context", {})
+    if not isinstance(body_context, dict):
+        body_context = {}
 
-    patient_id = context.get("patient_id", "")
-    fhir_token = context.get("fhir_token", "")
+    header_context = extract_fhir_context_from_headers(
+        x_patient_id=x_patient_id,
+        x_fhir_access_token=x_fhir_access_token,
+        x_fhir_server_url=x_fhir_server_url,
+        x_fhir_refresh_token=x_fhir_refresh_token,
+        x_fhir_refresh_url=x_fhir_refresh_url,
+    )
+
+    # Body context wins when present; headers fill any missing values.
+    message = body.get("message", "")
+    patient_id = body_context.get("patient_id") or header_context.get("patient_id") or ""
+    fhir_token = body_context.get("fhir_token") or header_context.get("fhir_token") or ""
 
     result = await run_orchestrator(
         message=message,
