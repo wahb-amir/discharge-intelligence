@@ -158,7 +158,7 @@ def build_agent_card() -> dict[str, Any]:
                 {
                     "uri": "https://app.promptopinion.ai/schemas/a2a/v1/fhir-context",
                     "description": "FHIR context allowing the agent to query a FHIR server securely",
-                    "required": True
+                    "required": False
                 }
             ]
         },
