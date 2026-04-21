@@ -1,9 +1,9 @@
 import json
 import os
-from typing import Any
+from typing import Any, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -149,12 +149,23 @@ def build_agent_card() -> dict[str, Any]:
             }
         ],
 
+        # ── Auth declaration ──────────────────────────────
+        "securitySchemes": {
+            "apiKey": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "x-api-key",
+                "description": "API key for authenticating requests"
+            }
+        },
+        "security": [
+            {"apiKey": []}
+        ],
+
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
             "extendedAgentCard": False,
-
-            # ✅ FIX: MUST be a LIST (not dict)
             "extensions": [
                 {
                     "uri": "ai.promptopinion/fhir-context",
@@ -201,7 +212,6 @@ def build_agent_card() -> dict[str, Any]:
             }
         ],
     }
-
 def extract_fhir_context_from_headers(
     x_patient_id: str | None,
     x_fhir_access_token: str | None,
@@ -459,12 +469,18 @@ async def mcp_tool_call(
 @app.post("/agents/orchestrator")
 async def orchestrator_endpoint(
     request: Request,
+    x_api_key: Optional[str] = Header(None),
     x_patient_id: str | None = None,
     x_fhir_server_url: str | None = None,
     x_fhir_access_token: str | None = None,
     x_fhir_refresh_token: str | None = None,
     x_fhir_refresh_url: str | None = None,
 ):
+    # Auth check
+    expected_key = os.getenv("AGENT_API_KEY", "discharge123secret")
+    if x_api_key != expected_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
     try:
         body = await request.json()
     except Exception:
@@ -485,19 +501,24 @@ async def orchestrator_endpoint(
         x_fhir_refresh_url=x_fhir_refresh_url,
     )
 
-    # Body context wins when present; headers fill any missing values.
     message = body.get("message", "")
     patient_id = body_context.get("patient_id") or header_context.get("patient_id") or ""
     fhir_token = body_context.get("fhir_token") or header_context.get("fhir_token") or ""
+    fhir_server_url = body_context.get("fhir_server_url") or header_context.get("fhir_server_url") or None
+
+    # Log what we received for debugging
+    print(f"[Endpoint] patient_id: {patient_id}")
+    print(f"[Endpoint] fhir_server_url: {fhir_server_url}")
+    print(f"[Endpoint] fhir_token present: {bool(fhir_token)}")
 
     result = await run_orchestrator(
         message=message,
         patient_id=patient_id,
         fhir_token=fhir_token,
+        fhir_server_url=fhir_server_url
     )
 
     return {"response": result}
-
 
 # ─── Health Check ─────────────────────────────────────────
 @app.get("/health")
