@@ -142,53 +142,29 @@ def build_agent_card() -> dict[str, Any]:
 
         "supportedInterfaces": [
             {
-                "url": PUBLIC_URL,
+                "url": f"{PUBLIC_URL}/agents/orchestrator/jsonrpc",
+                "protocolBinding": "JSONRPC",
+                "protocolVersion": "1.0"
+            },
+            {
+                "url": f"{PUBLIC_URL}/agents/orchestrator",
                 "protocolBinding": "HTTP+JSON",
-                "protocolVersion": "1.0",
-                "authentication": {
-                    "schemes": [
-                        {
-                            "scheme": "apikey",
-                            "in": "header",
-                            "name": "x-api-key"
-                        }
-                    ]
-                }
+                "protocolVersion": "1.0"
             }
         ],
 
         "capabilities": {
-            "streaming": False,
-            "pushNotifications": False,
-            "extendedAgentCard": False,
             "extensions": [
                 {
-                    "uri": "ai.promptopinion/fhir-context",
-                    "description": "Allows PromptOpinion to pass FHIR context to this agent.",
-                    "required": True,
-                    "params": {
-                        "scopes": [
-                            {"name": "patient/Patient.rs", "required": True},
-                            {"name": "patient/Condition.rs"},
-                            {"name": "patient/MedicationRequest.rs"},
-                            {"name": "patient/Observation.rs"},
-                            {"name": "patient/DocumentReference.rs"},
-                        ]
-                    },
-                },
-                {
-                    "uri": "io.modelcontextprotocol/ui",
-                    "description": "MCP UI compatibility extension.",
-                    "required": False,
-                    "params": {
-                        "mimeTypes": ["text/html;profile=mcp-app"]
-                    },
-                },
-            ],
+                    "uri": "https://app.promptopinion.ai/schemas/a2a/v1/fhir-context",
+                    "description": "FHIR context allowing the agent to query a FHIR server securely",
+                    "required": True
+                }
+            ]
         },
 
-        "defaultInputModes": ["application/json", "text/plain"],
-        "defaultOutputModes": ["application/json", "text/plain"],
+        "defaultInputModes": ["text/plain"],
+        "defaultOutputModes": ["text/plain"],
 
         "skills": [
             {
@@ -203,9 +179,32 @@ def build_agent_card() -> dict[str, Any]:
                 "examples": [
                     "Is this patient ready for discharge?",
                     "What is blocking discharge for this patient?",
-                ],
+                ]
             }
         ],
+
+        "securitySchemes": {
+            "prompt-opinion-api-key": {
+                "apiKeySecurityScheme": {
+                    "name": "x-api-key",
+                    "location": "header"
+                }
+            },
+            "prompt-opinion-client-credentials": {
+                "oauth2SecurityScheme": {
+                    "flows": {
+                        "clientCredentials": {
+                            "tokenUrl": "https://app.promptopinion.ai/openid/connect/token",
+                            "scopes": {
+                                "openid": "Scope to indicate this is an openid connect flow",
+                                "po_fhir": "Access to Po's FHIR server"
+                            }
+                        }
+                    },
+                    "oauth2MetadataUrl": "https://app.promptopinion.ai/.well-known/openid-configuration"
+                }
+            }
+        }
     }
 def extract_fhir_context_from_headers(
     x_patient_id: str | None,
@@ -518,4 +517,93 @@ def root():
     return {
         "service": "Discharge Intelligence Network",
         "status": "running",
+    }
+    
+@app.post("/agents/orchestrator/jsonrpc")
+async def orchestrator_jsonrpc(
+    request: Request,
+    x_api_key: Optional[str] = Header(None),
+    x_patient_id: str | None = None,
+    x_fhir_server_url: str | None = None,
+    x_fhir_access_token: str | None = None,
+    x_fhir_refresh_token: str | None = None,
+    x_fhir_refresh_url: str | None = None,
+):
+    """JSONRPC binding for A2A protocol"""
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+
+    print(f"[JSONRPC] Received: {body}")
+
+    request_id = body.get("id")
+    method = body.get("method", "")
+    params = body.get("params", {})
+
+    # A2A task execution
+    if method in ("tasks/send", "message/send", "tasks/run"):
+        message_data = params.get("message", params)
+        
+        if isinstance(message_data, dict):
+            parts = message_data.get("parts", [])
+            message = " ".join(
+                p.get("text", "") for p in parts 
+                if isinstance(p, dict)
+            ) if parts else message_data.get("text", str(message_data))
+        else:
+            message = str(message_data)
+
+        header_context = extract_fhir_context_from_headers(
+            x_patient_id=x_patient_id,
+            x_fhir_access_token=x_fhir_access_token,
+            x_fhir_server_url=x_fhir_server_url,
+            x_fhir_refresh_token=x_fhir_refresh_token,
+            x_fhir_refresh_url=x_fhir_refresh_url,
+        )
+
+        patient_id = header_context.get("patient_id", "")
+        fhir_token = header_context.get("fhir_token", "")
+        fhir_server_url = header_context.get("fhir_server_url")
+
+        result = await run_orchestrator(
+            message=message,
+            patient_id=patient_id,
+            fhir_token=fhir_token,
+            fhir_server_url=fhir_server_url
+        )
+
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "id": f"task-{request_id}",
+                "status": {"state": "completed"},
+                "artifacts": [
+                    {
+                        "parts": [
+                            {
+                                "type": "text",
+                                "text": result
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+
+    # Agent card discovery via JSONRPC
+    if method == "agent/getCard":
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": build_agent_card()
+        }
+
+    # Fallback
+    print(f"[JSONRPC] Unhandled method: {method}")
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": {"status": "ok"}
     }
