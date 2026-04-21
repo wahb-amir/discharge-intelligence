@@ -1,9 +1,9 @@
 import json
 import os
-from typing import Any, Optional
+from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Header
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -128,7 +128,6 @@ def tool_result_to_text(result) -> str:
         return result
     return json.dumps(result, ensure_ascii=False, default=str, indent=2)
 
-
 def build_agent_card() -> dict[str, Any]:
     return {
         "name": "Discharge Readiness Orchestrator",
@@ -146,20 +145,16 @@ def build_agent_card() -> dict[str, Any]:
                 "url": PUBLIC_URL,
                 "protocolBinding": "HTTP+JSON",
                 "protocolVersion": "1.0",
+                "authentication": {
+                    "schemes": [
+                        {
+                            "scheme": "apikey",
+                            "in": "header",
+                            "name": "x-api-key"
+                        }
+                    ]
+                }
             }
-        ],
-
-        # ── Auth declaration ──────────────────────────────
-        "securitySchemes": {
-            "apiKey": {
-                "type": "apiKey",
-                "in": "header",
-                "name": "x-api-key",
-                "description": "API key for authenticating requests"
-            }
-        },
-        "security": [
-            {"apiKey": []}
         ],
 
         "capabilities": {
@@ -469,18 +464,12 @@ async def mcp_tool_call(
 @app.post("/agents/orchestrator")
 async def orchestrator_endpoint(
     request: Request,
-    x_api_key: Optional[str] = Header(None),
     x_patient_id: str | None = None,
     x_fhir_server_url: str | None = None,
     x_fhir_access_token: str | None = None,
     x_fhir_refresh_token: str | None = None,
     x_fhir_refresh_url: str | None = None,
 ):
-    # Auth check
-    expected_key = os.getenv("AGENT_API_KEY", "discharge123secret")
-    if x_api_key != expected_key:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-
     try:
         body = await request.json()
     except Exception:
@@ -501,24 +490,19 @@ async def orchestrator_endpoint(
         x_fhir_refresh_url=x_fhir_refresh_url,
     )
 
+    # Body context wins when present; headers fill any missing values.
     message = body.get("message", "")
     patient_id = body_context.get("patient_id") or header_context.get("patient_id") or ""
     fhir_token = body_context.get("fhir_token") or header_context.get("fhir_token") or ""
-    fhir_server_url = body_context.get("fhir_server_url") or header_context.get("fhir_server_url") or None
-
-    # Log what we received for debugging
-    print(f"[Endpoint] patient_id: {patient_id}")
-    print(f"[Endpoint] fhir_server_url: {fhir_server_url}")
-    print(f"[Endpoint] fhir_token present: {bool(fhir_token)}")
 
     result = await run_orchestrator(
         message=message,
         patient_id=patient_id,
         fhir_token=fhir_token,
-        fhir_server_url=fhir_server_url
     )
 
     return {"response": result}
+
 
 # ─── Health Check ─────────────────────────────────────────
 @app.get("/health")
