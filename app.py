@@ -4,6 +4,7 @@ from typing import Optional
 from fastapi import FastAPI, Header, Header, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from httpx import request
 from mcp.server import MCP_TOOLS, call_tool
 from agents.orchestrator import run_orchestrator
 
@@ -58,8 +59,8 @@ def verify_api_key(x_api_key: str | None):
 
 @app.get("/mcp")
 def mcp_info(x_api_key: str | None = Header(None)):
+    # 🔐 AUTH CHECK (runs first)
     verify_api_key(x_api_key)
-
     return {
         "name": "Discharge Intelligence MCP",
         "version": "1.0.0",
@@ -67,15 +68,96 @@ def mcp_info(x_api_key: str | None = Header(None)):
     }
 
 
+
 @app.post("/mcp")
-async def mcp_post(request: Request):
+async def mcp_post(
+    request: Request,
+    x_api_key: str | None = Header(None)
+):
+    # 🔐 AUTH CHECK (runs first)
+    verify_api_key(x_api_key)
+
     body = await request.json()
-    
-    # Log exactly what Prompt Opinion sends
     print(f"[MCP] Received: {body}")
-    
+
     method = body.get("method", "")
-    print(f"[MCP] Method: {method}")
+    request_id = body.get("id")
+
+    # ─── Initialize handshake ─────────────────────────────
+    if method == "initialize":
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {
+                    "tools": {}
+                },
+                "serverInfo": {
+                    "name": "Discharge Intelligence MCP",
+                    "version": "1.0.0"
+                }
+            }
+        }
+
+    # ─── Initialized notification ─────────────────────────
+    if method == "notifications/initialized":
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {}
+        }
+
+    # ─── Tool discovery ───────────────────────────────────
+    if method == "tools/list":
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "tools": MCP_TOOLS
+            }
+        }
+
+    # ─── Tool call ────────────────────────────────────────
+    if method == "tools/call":
+        params = body.get("params", {})
+        tool_name = params.get("name", "")
+        arguments = params.get("arguments", {})
+
+        patient_id = arguments.get("patient_id", "")
+        fhir_token = arguments.get("fhir_token", "")
+
+        result = await call_tool(tool_name, patient_id, fhir_token)
+
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": str(result)
+                    }
+                ]
+            }
+        }
+
+    # ─── Ping ─────────────────────────────────────────────
+    if method == "ping":
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {}
+        }
+
+    # ─── Fallback ─────────────────────────────────────────
+    print(f"[MCP] Unhandled method: {method}")
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "result": {}
+    }
+    
 @app.post("/mcp/tools/{tool_name}")
 async def mcp_tool_call(tool_name: str, request: Request):
     body = await request.json()
