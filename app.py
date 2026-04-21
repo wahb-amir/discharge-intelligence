@@ -297,11 +297,11 @@ def mcp_info():
 @app.post("/mcp")
 async def mcp_post(
     request: Request,
-    x_patient_id: str | None = None,
-    x_fhir_server_url: str | None = None,
-    x_fhir_access_token: str | None = None,
-    x_fhir_refresh_token: str | None = None,
-    x_fhir_refresh_url: str | None = None,
+    x_patient_id: Optional[str] = Header(None),
+    x_fhir_server_url: Optional[str] = Header(None),
+    x_fhir_access_token: Optional[str] = Header(None),
+    x_fhir_refresh_token: Optional[str] = Header(None),
+    x_fhir_refresh_url: Optional[str] = Header(None),
 ):
     try:
         body = await request.json()
@@ -363,6 +363,7 @@ async def mcp_post(
                 f"Unknown tool: {tool_name}",
             )
 
+        # Try arguments first, then fall back to headers
         patient_id = (
             arguments.get("patient_id")
             or header_context.get("patient_id")
@@ -374,11 +375,26 @@ async def mcp_post(
             or ""
         )
 
-        if not patient_id or not fhir_token:
+        # Log what we actually received for debugging
+        print(f"[MCP] Tool: {tool_name}")
+        print(f"[MCP] patient_id from args: {arguments.get('patient_id')}")
+        print(f"[MCP] patient_id from headers: {header_context.get('patient_id')}")
+        print(f"[MCP] fhir_token from args: {bool(arguments.get('fhir_token'))}")
+        print(f"[MCP] fhir_token from headers: {bool(header_context.get('fhir_token'))}")
+        print(f"[MCP] All headers: {dict(request.headers)}")
+
+        if not patient_id:
             return jsonrpc_error(
                 request_id,
                 -32602,
-                "patient_id and fhir_token are required",
+                "patient_id is required",
+            )
+
+        if not fhir_token:
+            return jsonrpc_error(
+                request_id,
+                -32602,
+                "fhir_token is required — FHIR context not received from Prompt Opinion",
             )
 
         result = await call_tool(tool_name, patient_id, fhir_token)
