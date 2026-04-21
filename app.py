@@ -143,7 +143,7 @@ def build_agent_card() -> dict[str, Any]:
         "supportedInterfaces": [
             {
                 "url": PUBLIC_URL,
-                "protocolBinding": A2A_PROTOCOL_BINDING,
+                "protocolBinding": "HTTP+JSON",
                 "protocolVersion": "1.0",
             }
         ],
@@ -151,28 +151,30 @@ def build_agent_card() -> dict[str, Any]:
             "streaming": False,
             "pushNotifications": False,
             "extendedAgentCard": False,
-            "extensions": {
-                "ai.promptopinion/fhir-context": {
-                    "scopes": [
-                        {
-                            "name": "patient/Patient.rs",
-                            "required": True,
-                        },
-                        {
-                            "name": "patient/Condition.rs",
-                        },
-                        {
-                            "name": "patient/MedicationRequest.rs",
-                        },
-                        {
-                            "name": "patient/Observation.rs",
-                        },
-                        {
-                            "name": "patient/DocumentReference.rs",
-                        },
-                    ]
-                }
-            },
+            "extensions": [
+                {
+                    "uri": "ai.promptopinion/fhir-context",
+                    "description": "Allows PromptOpinion to pass FHIR context to this agent.",
+                    "required": True,
+                    "params": {
+                        "scopes": [
+                            {"name": "patient/Patient.rs", "required": True},
+                            {"name": "patient/Condition.rs"},
+                            {"name": "patient/MedicationRequest.rs"},
+                            {"name": "patient/Observation.rs"},
+                            {"name": "patient/DocumentReference.rs"},
+                        ]
+                    },
+                },
+                {
+                    "uri": "io.modelcontextprotocol/ui",
+                    "description": "MCP UI compatibility extension.",
+                    "required": False,
+                    "params": {
+                        "mimeTypes": ["text/html;profile=mcp-app"],
+                    },
+                },
+            ],
         },
         "defaultInputModes": ["application/json", "text/plain"],
         "defaultOutputModes": ["application/json", "text/plain"],
@@ -196,7 +198,6 @@ def build_agent_card() -> dict[str, Any]:
             }
         ],
     }
-
 
 def extract_fhir_context_from_headers(
     x_patient_id: str | None,
