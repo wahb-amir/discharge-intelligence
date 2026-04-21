@@ -93,12 +93,19 @@ async def mcp_post(
                 "capabilities": {
                     "tools": {},
                     "extensions": {
+                        "promptopinion.fhir": {
+                            "version": "1.0",
+                            "enabled": True,
+                            "resources": [
+                                "Patient",
+                                "Observation",
+                                "MedicationRequest",
+                                "Condition",
+                                "DocumentReference"
+                            ]
+                        },
                         "io.modelcontextprotocol/ui": {
                             "mimeTypes": ["text/html;profile=mcp-app"]
-                        },
-                        "com.promptopinion/fhir": {
-                            "version": "1.0",
-                            "supported": True
                         }
                     }
                 },
