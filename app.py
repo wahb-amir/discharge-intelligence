@@ -200,20 +200,23 @@ async def mcp_post(
                     "extensions": {
                         "ai.promptopinion/fhir-context": {
                             "scopes": [
-                                {
-                                    "name": "patient/Patient.rs",
-                                    "required": True
-                                },
-                                {
-                                    "name": "patient/Condition.rs"
-                                },
-                                {
-                                    "name": "patient/Observation.rs"
-                                },
-                                {
-                                    "name": "patient/MedicationRequest.rs"
-                                }
-                            ]
+    {
+        "name": "patient/Patient.rs",
+        "required": True
+    },
+    {
+        "name": "patient/Condition.rs"
+    },
+    {
+        "name": "patient/MedicationRequest.rs"
+    },
+    {
+        "name": "patient/Observation.rs"
+    },
+    {
+        "name": "patient/DocumentReference.rs"
+    }
+]
                         },
                         "io.modelcontextprotocol/ui": {
                             "mimeTypes": ["text/html;profile=mcp-app"]
