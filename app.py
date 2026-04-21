@@ -1,6 +1,7 @@
 import os
 import asyncio
-from fastapi import FastAPI, Request, HTTPException
+from typing import Optional
+from fastapi import FastAPI, Header, Header, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from mcp.server import MCP_TOOLS, call_tool
@@ -47,7 +48,8 @@ def agent_card():
 
 # ─── MCP Endpoints ────────────────────────────────────────
 @app.get("/mcp")
-def mcp_info():
+def mcp_info(x_api_key: Optional[str] = Header(None)):
+    # Accept any key for now, just needs to not crash
     return {
         "name": "Discharge Intelligence MCP",
         "version": "1.0.0",
