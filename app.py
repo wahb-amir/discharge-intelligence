@@ -293,6 +293,17 @@ def mcp_info():
         "tools": MCP_TOOLS,
     }
 
+@app.post("/debug")
+async def debug_headers(request: Request):
+    """Temporary debug endpoint to see all headers"""
+    headers = dict(request.headers)
+    body = await request.json()
+    print(f"[DEBUG] Headers: {headers}")
+    print(f"[DEBUG] Body: {body}")
+    return {
+        "headers": headers,
+        "body": body
+    }
 
 @app.post("/mcp")
 async def mcp_post(
