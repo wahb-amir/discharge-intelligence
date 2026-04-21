@@ -59,7 +59,6 @@ def verify_api_key(x_api_key: str | None):
 
 @app.get("/mcp")
 def mcp_info(x_api_key: str | None = Header(None)):
-    # 🔐 AUTH CHECK (runs first)
     verify_api_key(x_api_key)
     return {
         "name": "Discharge Intelligence MCP",
@@ -68,13 +67,8 @@ def mcp_info(x_api_key: str | None = Header(None)):
     }
 
 
-
 @app.post("/mcp")
-async def mcp_post(
-    request: Request,
-    x_api_key: str | None = Header(None)
-):
-    # 🔐 AUTH CHECK (runs first)
+async def mcp_post(request: Request, x_api_key: str | None = Header(None)):
     verify_api_key(x_api_key)
 
     body = await request.json()
@@ -83,27 +77,15 @@ async def mcp_post(
     method = body.get("method", "")
     request_id = body.get("id")
 
-    # ─── Initialize handshake ─────────────────────────────
     if method == "initialize":
         return {
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "protocolVersion": "2025-11-25",
+                "protocolVersion": body.get("params", {}).get("protocolVersion", "2025-11-25"),
                 "capabilities": {
                     "tools": {},
                     "extensions": {
-                        "promptopinion.fhir": {
-                            "version": "1.0",
-                            "enabled": True,
-                            "resources": [
-                                "Patient",
-                                "Observation",
-                                "MedicationRequest",
-                                "Condition",
-                                "DocumentReference"
-                            ]
-                        },
                         "io.modelcontextprotocol/ui": {
                             "mimeTypes": ["text/html;profile=mcp-app"]
                         }
@@ -116,42 +98,18 @@ async def mcp_post(
             }
         }
 
-    # ─── Initialized notification ─────────────────────────
     if method == "notifications/initialized":
-        return {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "result": {}
-        }
+        return Response(status_code=204)
 
-    # ─── Tool discovery ───────────────────────────────────
     if method == "tools/list":
         return {
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "tools": MCP_TOOLS,
-                "extensions": {
-                    "com.promptopinion/fhir": {
-                        "version": "1.0",
-                        "contextParameters": [
-                            {
-                                "name": "fhir_token",
-                                "in": "arguments",
-                                "description": "FHIR access token injected by Prompt Opinion"
-                            },
-                            {
-                                "name": "patient_id",
-                                "in": "arguments",
-                                "description": "Current patient ID from Prompt Opinion context"
-                            }
-                        ]
-                    }
-                }
+                "tools": MCP_TOOLS
             }
         }
 
-    # ─── Tool call ────────────────────────────────────────
     if method == "tools/call":
         params = body.get("params", {})
         tool_name = params.get("name", "")
@@ -175,7 +133,6 @@ async def mcp_post(
             }
         }
 
-    # ─── Ping ─────────────────────────────────────────────
     if method == "ping":
         return {
             "jsonrpc": "2.0",
@@ -183,8 +140,6 @@ async def mcp_post(
             "result": {}
         }
 
-    # ─── Fallback ─────────────────────────────────────────
-    print(f"[MCP] Unhandled method: {method}")
     return {
         "jsonrpc": "2.0",
         "id": request_id,
