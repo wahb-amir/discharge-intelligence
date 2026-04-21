@@ -3,7 +3,7 @@ import os
 from typing import Any
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 
@@ -23,6 +23,7 @@ app.add_middleware(
 
 SUPPORTED_PROTOCOL_VERSION = os.getenv("MCP_PROTOCOL_VERSION", "2025-11-25")
 PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:7860")
+A2A_PROTOCOL_BINDING = "https://a2a-protocol.org/bindings/http-json"
 
 # Keep FHIR-context declarations enabled by default so PromptOpinion can
 # display the consent UI and pass FHIR context into the agent.
@@ -110,20 +111,6 @@ MCP_TOOLS = [
 
 MCP_TOOL_NAMES = {tool["name"] for tool in MCP_TOOLS}
 
-API_KEYS = {
-    key
-    for key in (
-        os.getenv("AGENT_API_KEY"),
-        os.getenv("AGENT_API_KEY_PROD"),
-    )
-    if key
-}
-
-
-def verify_api_key(x_api_key: str | None) -> None:
-    if not x_api_key or x_api_key not in API_KEYS:
-        raise HTTPException(status_code=401, detail="Invalid API Key")
-
 
 def jsonrpc_error(request_id, code: int, message: str, data: dict | None = None):
     error = {"code": code, "message": message}
@@ -155,8 +142,8 @@ def build_agent_card() -> dict[str, Any]:
         "url": PUBLIC_URL,
         "supportedInterfaces": [
             {
-                "url": f"{PUBLIC_URL}/agents/orchestrator",
-                "protocolBinding": "HTTP+JSON",
+                "url": PUBLIC_URL,
+                "protocolBinding": A2A_PROTOCOL_BINDING,
                 "protocolVersion": "1.0",
             }
         ],
@@ -164,27 +151,31 @@ def build_agent_card() -> dict[str, Any]:
             "streaming": False,
             "pushNotifications": False,
             "extendedAgentCard": False,
-            "extensions": [
-                {
-                    "uri": "ai.promptopinion/fhir-context",
-                    "description": (
-                        "Allows PromptOpinion to pass FHIR server URL, access token, "
-                        "and patient ID to this agent."
-                    ),
-                    "required": REQUIRE_FHIR_CONTEXT,
+            "extensions": {
+                "ai.promptopinion/fhir-context": {
+                    "scopes": [
+                        {
+                            "name": "patient/Patient.rs",
+                            "required": True,
+                        },
+                        {
+                            "name": "patient/Condition.rs",
+                        },
+                        {
+                            "name": "patient/MedicationRequest.rs",
+                        },
+                        {
+                            "name": "patient/Observation.rs",
+                        },
+                        {
+                            "name": "patient/DocumentReference.rs",
+                        },
+                    ]
                 }
-            ],
+            },
         },
         "defaultInputModes": ["application/json", "text/plain"],
         "defaultOutputModes": ["application/json", "text/plain"],
-        "securitySchemes": {
-            "apiKeyAuth": {
-                "type": "apiKey",
-                "in": "header",
-                "name": "X-API-Key",
-            }
-        },
-        "security": [{"apiKeyAuth": []}],
         "skills": [
             {
                 "id": "assess_discharge_readiness",
@@ -287,8 +278,7 @@ def agent_card_compat():
 
 # ─── MCP Endpoints ────────────────────────────────────────
 @app.get("/mcp")
-def mcp_info(x_api_key: str | None = Header(default=None, alias="X-API-Key")):
-    verify_api_key(x_api_key)
+def mcp_info():
     return {
         "name": "Discharge Intelligence MCP",
         "version": "1.0.0",
@@ -299,15 +289,12 @@ def mcp_info(x_api_key: str | None = Header(default=None, alias="X-API-Key")):
 @app.post("/mcp")
 async def mcp_post(
     request: Request,
-    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
-    x_patient_id: str | None = Header(default=None, alias="X-Patient-ID"),
-    x_fhir_server_url: str | None = Header(default=None, alias="X-FHIR-Server-URL"),
-    x_fhir_access_token: str | None = Header(default=None, alias="X-FHIR-Access-Token"),
-    x_fhir_refresh_token: str | None = Header(default=None, alias="X-FHIR-Refresh-Token"),
-    x_fhir_refresh_url: str | None = Header(default=None, alias="X-FHIR-Refresh-Url"),
+    x_patient_id: str | None = None,
+    x_fhir_server_url: str | None = None,
+    x_fhir_access_token: str | None = None,
+    x_fhir_refresh_token: str | None = None,
+    x_fhir_refresh_url: str | None = None,
 ):
-    verify_api_key(x_api_key)
-
     try:
         body = await request.json()
     except Exception:
@@ -423,15 +410,12 @@ async def mcp_post(
 async def mcp_tool_call(
     tool_name: str,
     request: Request,
-    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
-    x_patient_id: str | None = Header(default=None, alias="X-Patient-ID"),
-    x_fhir_server_url: str | None = Header(default=None, alias="X-FHIR-Server-URL"),
-    x_fhir_access_token: str | None = Header(default=None, alias="X-FHIR-Access-Token"),
-    x_fhir_refresh_token: str | None = Header(default=None, alias="X-FHIR-Refresh-Token"),
-    x_fhir_refresh_url: str | None = Header(default=None, alias="X-FHIR-Refresh-Url"),
+    x_patient_id: str | None = None,
+    x_fhir_server_url: str | None = None,
+    x_fhir_access_token: str | None = None,
+    x_fhir_refresh_token: str | None = None,
+    x_fhir_refresh_url: str | None = None,
 ):
-    verify_api_key(x_api_key)
-
     if tool_name not in MCP_TOOL_NAMES:
         raise HTTPException(status_code=404, detail="Unknown tool")
 
@@ -471,17 +455,12 @@ async def mcp_tool_call(
 @app.post("/agents/orchestrator")
 async def orchestrator_endpoint(
     request: Request,
-    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
-    x_patient_id: str | None = Header(default=None, alias="X-Patient-ID"),
-    x_fhir_server_url: str | None = Header(default=None, alias="X-FHIR-Server-URL"),
-    x_fhir_access_token: str | None = Header(default=None, alias="X-FHIR-Access-Token"),
-    x_fhir_refresh_token: str | None = Header(default=None, alias="X-FHIR-Refresh-Token"),
-    x_fhir_refresh_url: str | None = Header(default=None, alias="X-FHIR-Refresh-Url"),
+    x_patient_id: str | None = None,
+    x_fhir_server_url: str | None = None,
+    x_fhir_access_token: str | None = None,
+    x_fhir_refresh_token: str | None = None,
+    x_fhir_refresh_url: str | None = None,
 ):
-    expected_key = os.getenv("AGENT_API_KEY") or os.getenv("AGENT_API_KEY_PROD")
-    if not expected_key or x_api_key != expected_key:
-        raise HTTPException(status_code=401, detail="Invalid or missing API key")
-
     try:
         body = await request.json()
     except Exception:
