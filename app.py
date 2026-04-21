@@ -188,35 +188,43 @@ async def mcp_post(
 
     # ─── Initialize handshake ─────────────────────────────
     if method == "initialize":
-        requested_version = (
-            body.get("params", {}).get("protocolVersion")
-            or SUPPORTED_PROTOCOL_VERSION
-        )
-
-        negotiated_version = (
-            SUPPORTED_PROTOCOL_VERSION
-            if requested_version != SUPPORTED_PROTOCOL_VERSION
-            else requested_version
-        )
-
         return {
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "protocolVersion": negotiated_version,
+                "protocolVersion": body.get("params", {}).get("protocolVersion", "2025-11-25"),
                 "capabilities": {
                     "tools": {
-                        "listChanged": False,
+                        "listChanged": False
                     },
+                    "extensions": {
+                        "ai.promptopinion/fhir-context": {
+                            "scopes": [
+                                {
+                                    "name": "patient/Patient.rs",
+                                    "required": True
+                                },
+                                {
+                                    "name": "patient/Condition.rs"
+                                },
+                                {
+                                    "name": "patient/Observation.rs"
+                                },
+                                {
+                                    "name": "patient/MedicationRequest.rs"
+                                }
+                            ]
+                        },
+                        "io.modelcontextprotocol/ui": {
+                            "mimeTypes": ["text/html;profile=mcp-app"]
+                        }
+                    }
                 },
                 "serverInfo": {
                     "name": "Discharge Intelligence MCP",
-                    "version": "1.0.0",
-                },
-                "instructions": (
-                    "Use tools/list to discover tools and tools/call to execute them."
-                ),
-            },
+                    "version": "1.0.0"
+                }
+            }
         }
 
     # ─── Initialized notification ─────────────────────────
