@@ -68,60 +68,14 @@ def mcp_info(x_api_key: str | None = Header(None)):
 
 
 @app.post("/mcp")
-async def mcp_post(request: Request, x_api_key: str | None = Header(None)):
-    verify_api_key(x_api_key)
-
-    """
-    Prompt Opinion sends POST to /mcp to discover tools
-    and to invoke them. Handle both cases.
-    """
+async def mcp_post(request: Request):
     body = await request.json()
-
-    # Tool discovery request
+    
+    # Log exactly what Prompt Opinion sends
+    print(f"[MCP] Received: {body}")
+    
     method = body.get("method", "")
-
-    if method == "tools/list":
-        return {
-            "jsonrpc": "2.0",
-            "id": body.get("id"),
-            "result": {
-                "tools": MCP_TOOLS
-            }
-        }
-
-    # Tool call request
-    if method == "tools/call":
-        params = body.get("params", {})
-        tool_name = params.get("name", "")
-        arguments = params.get("arguments", {})
-
-        patient_id = arguments.get("patient_id", "")
-        fhir_token = arguments.get("fhir_token", "")
-
-        result = await call_tool(tool_name, patient_id, fhir_token)
-
-        return {
-            "jsonrpc": "2.0",
-            "id": body.get("id"),
-            "result": {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": str(result)
-                    }
-                ]
-            }
-        }
-
-    # Default — return tools list
-    return {
-        "jsonrpc": "2.0",
-        "id": body.get("id"),
-        "result": {
-            "tools": MCP_TOOLS
-        }
-    }
-
+    print(f"[MCP] Method: {method}")
 @app.post("/mcp/tools/{tool_name}")
 async def mcp_tool_call(tool_name: str, request: Request):
     body = await request.json()
