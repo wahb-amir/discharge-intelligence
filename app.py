@@ -21,6 +21,7 @@ app.add_middleware(
 )
 
 SUPPORTED_PROTOCOL_VERSION = os.getenv("MCP_PROTOCOL_VERSION", "2025-11-25")
+PUBLIC_URL = os.getenv("PUBLIC_URL", "http://localhost:7860")
 
 MCP_TOOLS = [
     {
@@ -100,7 +101,8 @@ MCP_TOOLS = [
 MCP_TOOL_NAMES = {tool["name"] for tool in MCP_TOOLS}
 
 API_KEYS = {
-    key for key in (
+    key
+    for key in (
         os.getenv("AGENT_API_KEY"),
         os.getenv("AGENT_API_KEY_PROD"),
     )
@@ -130,9 +132,7 @@ def tool_result_to_text(result) -> str:
     return json.dumps(result, ensure_ascii=False, default=str, indent=2)
 
 
-# ─── Agent Card ───────────────────────────────────────────
-@app.get("/.well-known/agent.json")
-def agent_card():
+def build_agent_card() -> dict:
     return {
         "name": "Discharge Readiness Orchestrator",
         "description": (
@@ -141,8 +141,19 @@ def agent_card():
             "discharge, needs a discharge assessment, or wants to know "
             "what is blocking a patient's discharge."
         ),
+        "url": PUBLIC_URL,
         "version": "1.0.0",
-        "url": os.getenv("PUBLIC_URL", "http://localhost:8000"),
+        "capabilities": {},
+        "securitySchemes": {
+            "api_key": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "X-API-Key",
+            }
+        },
+        "security": [{"api_key": []}],
+        "defaultInputModes": ["text/plain", "application/json"],
+        "defaultOutputModes": ["text/plain", "application/json"],
         "skills": [
             {
                 "id": "assess_discharge_readiness",
@@ -153,9 +164,71 @@ def agent_card():
                     "a structured discharge readiness report with a clear "
                     "verdict and any blocking issues."
                 ),
+                "tags": ["discharge", "fhir", "clinical", "mcp"],
+                "examples": [
+                    "Is this patient ready for discharge?",
+                    "What is blocking discharge for this patient?",
+                ],
+                "inputModes": ["text/plain", "application/json"],
+                "outputModes": ["text/plain", "application/json"],
             }
         ],
     }
+
+
+def build_mcp_initialize_result(requested_protocol_version: str | None) -> dict:
+    negotiated_version = SUPPORTED_PROTOCOL_VERSION
+    if requested_protocol_version == SUPPORTED_PROTOCOL_VERSION:
+        negotiated_version = requested_protocol_version
+
+    return {
+        "protocolVersion": negotiated_version,
+        "capabilities": {
+            "tools": {
+                "listChanged": False,
+            },
+            "extensions": {
+                "ai.promptopinion/fhir-context": {
+                    "scopes": [
+                        {
+                            "name": "patient/Patient.rs",
+                            "required": True,
+                        },
+                        {
+                            "name": "patient/Condition.rs",
+                        },
+                        {
+                            "name": "patient/MedicationRequest.rs",
+                        },
+                        {
+                            "name": "patient/Observation.rs",
+                        },
+                        {
+                            "name": "patient/DocumentReference.rs",
+                        },
+                    ]
+                },
+                "io.modelcontextprotocol/ui": {
+                    "mimeTypes": ["text/html;profile=mcp-app"],
+                },
+            },
+        },
+        "serverInfo": {
+            "name": "Discharge Intelligence MCP",
+            "version": "1.0.0",
+        },
+    }
+
+
+# ─── Agent Card ───────────────────────────────────────────
+@app.get("/.well-known/agent.json")
+def agent_card():
+    return build_agent_card()
+
+
+@app.get("/.well-known/agent-card.json")
+def agent_card_compat():
+    return build_agent_card()
 
 
 # ─── MCP Endpoints ────────────────────────────────────────
@@ -181,6 +254,9 @@ async def mcp_post(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
+    if not isinstance(body, dict):
+        return jsonrpc_error(None, -32600, "Invalid Request")
+
     print(f"[MCP] Received: {body}")
 
     method = body.get("method", "")
@@ -188,46 +264,12 @@ async def mcp_post(
 
     # ─── Initialize handshake ─────────────────────────────
     if method == "initialize":
+        params = body.get("params", {})
+        requested_protocol_version = params.get("protocolVersion")
         return {
             "jsonrpc": "2.0",
             "id": request_id,
-            "result": {
-                "protocolVersion": body.get("params", {}).get("protocolVersion", "2025-11-25"),
-                "capabilities": {
-                    "tools": {
-                        "listChanged": False
-                    },
-                    "extensions": {
-                        "ai.promptopinion/fhir-context": {
-                            "scopes": [
-                                    {
-                                        "name": "patient/Patient.rs",
-                                        "required": True
-                                    },
-                                    {
-                                        "name": "patient/Condition.rs"
-                                    },
-                                    {
-                                        "name": "patient/MedicationRequest.rs"
-                                    },
-                                    {
-                                        "name": "patient/Observation.rs"
-                                    },
-                                    {
-                                        "name": "patient/DocumentReference.rs"
-                                    }
-                                ]
-                        },
-                        "io.modelcontextprotocol/ui": {
-                            "mimeTypes": ["text/html;profile=mcp-app"]
-                        }
-                    }
-                },
-                "serverInfo": {
-                    "name": "Discharge Intelligence MCP",
-                    "version": "1.0.0"
-                }
-            }
+            "result": build_mcp_initialize_result(requested_protocol_version),
         }
 
     # ─── Initialized notification ─────────────────────────
@@ -316,6 +358,9 @@ async def mcp_tool_call(
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
     patient_id = body.get("patient_id")
     fhir_token = body.get("fhir_token")
 
@@ -340,8 +385,14 @@ async def orchestrator_endpoint(request: Request):
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
 
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+
     message = body.get("message", "")
     context = body.get("context", {})
+    if not isinstance(context, dict):
+        context = {}
+
     patient_id = context.get("patient_id", "")
     fhir_token = context.get("fhir_token", "")
 
@@ -360,4 +411,12 @@ def health():
     return {
         "status": "running",
         "service": "Discharge Intelligence Network",
+    }
+
+
+@app.get("/")
+def root():
+    return {
+        "service": "Discharge Intelligence Network",
+        "status": "running",
     }
