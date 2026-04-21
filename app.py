@@ -91,7 +91,16 @@ async def mcp_post(
             "result": {
                 "protocolVersion": "2025-11-25",
                 "capabilities": {
-                    "tools": {}
+                    "tools": {},
+                    "extensions": {
+                        "io.modelcontextprotocol/ui": {
+                            "mimeTypes": ["text/html;profile=mcp-app"]
+                        },
+                        "com.promptopinion/fhir": {
+                            "version": "1.0",
+                            "supported": True
+                        }
+                    }
                 },
                 "serverInfo": {
                     "name": "Discharge Intelligence MCP",
