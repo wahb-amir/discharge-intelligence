@@ -140,6 +140,7 @@ def build_agent_card() -> dict[str, Any]:
         ),
         "version": "1.0.0",
         "url": PUBLIC_URL,
+
         "supportedInterfaces": [
             {
                 "url": PUBLIC_URL,
@@ -147,10 +148,13 @@ def build_agent_card() -> dict[str, Any]:
                 "protocolVersion": "1.0",
             }
         ],
+
         "capabilities": {
             "streaming": False,
             "pushNotifications": False,
             "extendedAgentCard": False,
+
+            # ✅ FIX: MUST be a LIST (not dict)
             "extensions": [
                 {
                     "uri": "ai.promptopinion/fhir-context",
@@ -171,13 +175,15 @@ def build_agent_card() -> dict[str, Any]:
                     "description": "MCP UI compatibility extension.",
                     "required": False,
                     "params": {
-                        "mimeTypes": ["text/html;profile=mcp-app"],
+                        "mimeTypes": ["text/html;profile=mcp-app"]
                     },
                 },
             ],
         },
+
         "defaultInputModes": ["application/json", "text/plain"],
         "defaultOutputModes": ["application/json", "text/plain"],
+
         "skills": [
             {
                 "id": "assess_discharge_readiness",
@@ -185,16 +191,13 @@ def build_agent_card() -> dict[str, Any]:
                 "description": (
                     "Evaluates medication reconciliation, clinical status, "
                     "follow-up planning, and patient education to produce "
-                    "a structured discharge readiness report with a clear "
-                    "verdict and any blocking issues."
+                    "a structured discharge readiness report."
                 ),
-                "tags": ["discharge", "fhir", "clinical", "mcp"],
+                "tags": ["discharge", "fhir", "clinical"],
                 "examples": [
                     "Is this patient ready for discharge?",
                     "What is blocking discharge for this patient?",
                 ],
-                "inputModes": ["application/json", "text/plain"],
-                "outputModes": ["application/json", "text/plain"],
             }
         ],
     }
