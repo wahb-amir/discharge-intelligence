@@ -143,17 +143,21 @@ def build_agent_card() -> dict:
         ),
         "url": PUBLIC_URL,
         "version": "1.0.0",
-        "capabilities": {},
-        "securitySchemes": {
-            "api_key": {
-                "type": "apiKey",
-                "in": "header",
-                "name": "X-API-Key",
+        "supportedInterfaces": [
+            {
+                "url": f"{PUBLIC_URL}/mcp",
+                "protocolBinding": "HTTP+JSON",
+                "protocolVersion": "1.0",
             }
+        ],
+        "capabilities": {
+            "streaming": False,
+            "pushNotifications": False,
+            "extendedAgentCard": False,
+            "extensions": [],
         },
-        "security": [{"api_key": []}],
-        "defaultInputModes": ["text/plain", "application/json"],
-        "defaultOutputModes": ["text/plain", "application/json"],
+        "defaultInputModes": ["application/json", "text/plain"],
+        "defaultOutputModes": ["application/json", "text/plain"],
         "skills": [
             {
                 "id": "assess_discharge_readiness",
@@ -169,12 +173,21 @@ def build_agent_card() -> dict:
                     "Is this patient ready for discharge?",
                     "What is blocking discharge for this patient?",
                 ],
-                "inputModes": ["text/plain", "application/json"],
-                "outputModes": ["text/plain", "application/json"],
+                "inputModes": ["application/json", "text/plain"],
+                "outputModes": ["application/json", "text/plain"],
             }
         ],
     }
 
+
+@app.get("/.well-known/agent.json")
+def agent_card():
+    return build_agent_card()
+
+
+@app.get("/.well-known/agent-card.json")
+def agent_card_compat():
+    return build_agent_card()
 
 def build_mcp_initialize_result(requested_protocol_version: str | None) -> dict:
     negotiated_version = SUPPORTED_PROTOCOL_VERSION
@@ -219,16 +232,6 @@ def build_mcp_initialize_result(requested_protocol_version: str | None) -> dict:
         },
     }
 
-
-# ─── Agent Card ───────────────────────────────────────────
-@app.get("/.well-known/agent.json")
-def agent_card():
-    return build_agent_card()
-
-
-@app.get("/.well-known/agent-card.json")
-def agent_card_compat():
-    return build_agent_card()
 
 
 # ─── MCP Endpoints ────────────────────────────────────────
