@@ -293,26 +293,16 @@ def mcp_info():
         "tools": MCP_TOOLS,
     }
 
-@app.post("/debug")
-async def debug_headers(request: Request):
-    """Temporary debug endpoint to see all headers"""
-    headers = dict(request.headers)
-    body = await request.json()
-    print(f"[DEBUG] Headers: {headers}")
-    print(f"[DEBUG] Body: {body}")
-    return {
-        "headers": headers,
-        "body": body
-    }
+
 
 @app.post("/mcp")
 async def mcp_post(
     request: Request,
-    x_patient_id: Optional[str] = Header(None),
-    x_fhir_server_url: Optional[str] = Header(None),
-    x_fhir_access_token: Optional[str] = Header(None),
-    x_fhir_refresh_token: Optional[str] = Header(None),
-    x_fhir_refresh_url: Optional[str] = Header(None),
+    x_fhir_server_url: Optional[str] = Header(None, alias="x-fhir-server-url"),
+    x_fhir_access_token: Optional[str] = Header(None, alias="x-fhir-access-token"),
+    x_patient_id: Optional[str] = Header(None, alias="x-patient-id"),
+    x_fhir_refresh_token: Optional[str] = Header(None, alias="x-fhir-refresh-token"),
+    x_fhir_refresh_url: Optional[str] = Header(None, alias="x-fhir-refresh-url"),
 ):
     try:
         body = await request.json()
@@ -367,45 +357,24 @@ async def mcp_post(
         if not isinstance(arguments, dict):
             arguments = {}
 
-        if tool_name not in MCP_TOOL_NAMES:
-            return jsonrpc_error(
-                request_id,
-                -32602,
-                f"Unknown tool: {tool_name}",
-            )
+        # patient_id comes from tool arguments
+        # fhir_token comes from headers
+        patient_id = arguments.get("patient_id") or ""
+        fhir_token = x_fhir_access_token or ""
+        
+        # Use FHIR server URL from headers
+        if x_fhir_server_url:
+            os.environ["FHIR_BASE_URL"] = x_fhir_server_url
 
-        # Try arguments first, then fall back to headers
-        patient_id = (
-            arguments.get("patient_id")
-            or header_context.get("patient_id")
-            or ""
-        )
-        fhir_token = (
-            arguments.get("fhir_token")
-            or header_context.get("fhir_token")
-            or ""
-        )
-
-        # Log what we actually received for debugging
         print(f"[MCP] Tool: {tool_name}")
-        print(f"[MCP] patient_id from args: {arguments.get('patient_id')}")
-        print(f"[MCP] patient_id from headers: {header_context.get('patient_id')}")
-        print(f"[MCP] fhir_token from args: {bool(arguments.get('fhir_token'))}")
-        print(f"[MCP] fhir_token from headers: {bool(header_context.get('fhir_token'))}")
-        print(f"[MCP] All headers: {dict(request.headers)}")
+        print(f"[MCP] patient_id: {patient_id}")
+        print(f"[MCP] fhir_token present: {bool(fhir_token)}")
+        print(f"[MCP] fhir_server_url: {x_fhir_server_url}")
 
-        if not patient_id:
+        if not patient_id or not fhir_token:
             return jsonrpc_error(
-                request_id,
-                -32602,
-                "patient_id is required",
-            )
-
-        if not fhir_token:
-            return jsonrpc_error(
-                request_id,
-                -32602,
-                "fhir_token is required — FHIR context not received from Prompt Opinion",
+                request_id, -32602,
+                f"Missing: patient_id={bool(patient_id)} fhir_token={bool(fhir_token)}"
             )
 
         result = await call_tool(tool_name, patient_id, fhir_token)
@@ -414,12 +383,7 @@ async def mcp_post(
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": tool_result_to_text(result),
-                    }
-                ],
+                "content": [{"type": "text", "text": tool_result_to_text(result)}],
                 "isError": False,
             },
         }
@@ -490,11 +454,12 @@ async def mcp_tool_call(
 @app.post("/agents/orchestrator")
 async def orchestrator_endpoint(
     request: Request,
-    x_patient_id: str | None = None,
-    x_fhir_server_url: str | None = None,
-    x_fhir_access_token: str | None = None,
-    x_fhir_refresh_token: str | None = None,
-    x_fhir_refresh_url: str | None = None,
+    x_api_key: Optional[str] = Header(None, alias="x-api-key"),
+    x_fhir_server_url: Optional[str] = Header(None, alias="x-fhir-server-url"),
+    x_fhir_access_token: Optional[str] = Header(None, alias="x-fhir-access-token"),
+    x_patient_id: Optional[str] = Header(None, alias="x-patient-id"),
+    x_fhir_refresh_token: Optional[str] = Header(None, alias="x-fhir-refresh-token"),
+    x_fhir_refresh_url: Optional[str] = Header(None, alias="x-fhir-refresh-url"),
 ):
     try:
         body = await request.json()
@@ -549,12 +514,12 @@ def root():
 @app.post("/agents/orchestrator/jsonrpc")
 async def orchestrator_jsonrpc(
     request: Request,
-    x_api_key: Optional[str] = Header(None),
-    x_patient_id: str | None = None,
-    x_fhir_server_url: str | None = None,
-    x_fhir_access_token: str | None = None,
-    x_fhir_refresh_token: str | None = None,
-    x_fhir_refresh_url: str | None = None,
+    x_api_key: Optional[str] = Header(None, alias="x-api-key"),
+    x_fhir_server_url: Optional[str] = Header(None, alias="x-fhir-server-url"),
+    x_fhir_access_token: Optional[str] = Header(None, alias="x-fhir-access-token"),
+    x_patient_id: Optional[str] = Header(None, alias="x-patient-id"),
+    x_fhir_refresh_token: Optional[str] = Header(None, alias="x-fhir-refresh-token"),
+    x_fhir_refresh_url: Optional[str] = Header(None, alias="x-fhir-refresh-url"),
 ):
     """JSONRPC binding for A2A protocol"""
     try:
