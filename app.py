@@ -130,7 +130,24 @@ async def mcp_post(
             "jsonrpc": "2.0",
             "id": request_id,
             "result": {
-                "tools": MCP_TOOLS
+                "tools": MCP_TOOLS,
+                "extensions": {
+                    "com.promptopinion/fhir": {
+                        "version": "1.0",
+                        "contextParameters": [
+                            {
+                                "name": "fhir_token",
+                                "in": "arguments",
+                                "description": "FHIR access token injected by Prompt Opinion"
+                            },
+                            {
+                                "name": "patient_id",
+                                "in": "arguments",
+                                "description": "Current patient ID from Prompt Opinion context"
+                            }
+                        ]
+                    }
+                }
             }
         }
 
