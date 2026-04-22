@@ -18,7 +18,46 @@ load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+def summarize_list(items, keys, limit=5):
+    """
+    Convert raw tool output into compact LLM-safe text.
+    """
+    if not items:
+        return "None"
 
+    lines = []
+    for item in items[:limit]:
+        line = ", ".join(
+            f"{k}: {item.get(k, 'N/A')}" for k in keys
+        )
+        lines.append(f"- {line}")
+
+    return "\n".join(lines)
+def clip_text(text, limit=800):
+    if text is None:
+        return "None"
+    text = str(text).strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n...[TRUNCATED]"
+
+
+def compact_list(items, limit=5):
+    if not items:
+        return "None"
+    return "\n".join(f"- {clip_text(item, 180)}" for item in items[:limit])
+
+
+def compact_assessment(a: dict) -> dict:
+    return {
+        "status": a.get("status", "UNKNOWN"),
+        "conflicts": a.get("conflicts", [])[:5],
+        "concerns": a.get("concerns", [])[:5],
+        "required_appointments": a.get("required_appointments", [])[:5],
+        "notes": clip_text(a.get("notes", ""), 600),
+        "summary": clip_text(a.get("summary", ""), 600),
+    }
+    
 async def fetch_all_patient_data(
     patient_id: str,
     fhir_token: str,
@@ -147,110 +186,69 @@ async def synthesize_report(
     risk_level: str,
     patient_name: str
 ) -> str:
-    """
-    Uses Groq to write a clean, structured
-    discharge readiness report from all assessments.
-    """
-    med = assessments["medication"]
-    clinical = assessments["clinical"]
-    followup = assessments["followup"]
-    education = assessments["education"]
+    med = compact_assessment(assessments["medication"])
+    clinical = compact_assessment(assessments["clinical"])
+    followup = compact_assessment(assessments["followup"])
+    education = compact_assessment(assessments["education"])
 
     blocking_issues = []
     ready_items = []
     recommended_actions = []
 
-    # Medication
-    if med.get("status") == "FLAGGED":
-        for conflict in med.get("conflicts", []):
-            blocking_issues.append(f"Medication: {conflict}")
-        recommended_actions.append(
-            "Resolve medication conflicts with pharmacy before discharge"
-        )
+    if med["status"] == "FLAGGED":
+        blocking_issues.extend([f"Medication: {c}" for c in med["conflicts"]])
+        recommended_actions.append("Resolve medication conflicts with pharmacy before discharge")
     else:
         ready_items.append("Medications reconciled — no conflicts found")
 
-    # Clinical
-    if clinical.get("status") == "NOT_READY":
-        for concern in clinical.get("concerns", []):
-            blocking_issues.append(f"Clinical: {concern}")
-        recommended_actions.append(
-            "Address outstanding clinical concerns before discharge"
-        )
+    if clinical["status"] == "NOT_READY":
+        blocking_issues.extend([f"Clinical: {c}" for c in clinical["concerns"]])
+        recommended_actions.append("Address outstanding clinical concerns before discharge")
     else:
         ready_items.append("Clinical status acceptable for discharge")
 
-    # Follow-up
-    if followup.get("status") == "INCOMPLETE":
+    if followup["status"] == "INCOMPLETE":
         blocking_issues.append("Follow-up appointments not confirmed")
-        for appt in followup.get("required_appointments", []):
-            recommended_actions.append(f"Book: {appt}")
+        recommended_actions.extend([f"Book: {a}" for a in followup["required_appointments"]])
     else:
         ready_items.append("Follow-up plan in place")
 
-    # Education always completes
     ready_items.append("Patient discharge instructions generated")
 
-    # Build full assessment context for synthesis
-    med_detail = med.get("full_assessment", med.get("notes", "No medication details"))
-    clinical_detail = clinical.get("full_assessment", clinical.get("notes", "No clinical details"))
-    followup_detail = followup.get("full_assessment", followup.get("notes", "No follow-up details"))
-
     prompt = f"""
-Write a professional discharge readiness report for {patient_name}.
+        Write a concise discharge readiness report for {patient_name}.
 
-VERDICT: {verdict}
-RISK LEVEL: {risk_level}
+        VERDICT: {verdict}
+        RISK LEVEL: {risk_level}
 
-BLOCKING ISSUES:
-{chr(10).join(f"- {i}" for i in blocking_issues) or "- None"}
+        BLOCKING ISSUES:
+        {chr(10).join(f"- {i}" for i in blocking_issues) or "- None"}
 
-READY ITEMS:
-{chr(10).join(f"- {i}" for i in ready_items)}
+        READY ITEMS:
+        {chr(10).join(f"- {i}" for i in ready_items) or "- None"}
 
-RECOMMENDED ACTIONS:
-{chr(10).join(f"- {a}" for a in recommended_actions) or "- None"}
+        RECOMMENDED ACTIONS:
+        {chr(10).join(f"- {a}" for a in recommended_actions) or "- None"}
 
-DETAILED MEDICATION ASSESSMENT:
-{med_detail}
+        MEDICATION SUMMARY:
+        Status: {med["status"]}
+        Summary: {med["summary"]}
+        Notes: {med["notes"]}
 
-DETAILED CLINICAL ASSESSMENT:
-{clinical_detail}
+        CLINICAL SUMMARY:
+        Status: {clinical["status"]}
+        Summary: {clinical["summary"]}
+        Notes: {clinical["notes"]}
 
-DETAILED FOLLOW-UP PLAN:
-{followup_detail}
+        FOLLOW-UP SUMMARY:
+        Status: {followup["status"]}
+        Summary: {followup["summary"]}
+        Notes: {followup["notes"]}
 
-Write this as a concise, professional clinical report.
-Start with the verdict prominently displayed.
-Be specific about what is blocking discharge and why.
-End with clear numbered next steps for the clinical team.
-Keep it under 400 words.
-"""
-
-    response = client.chat.completions.create(
-        model=MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a senior hospitalist writing a discharge "
-                    "readiness report. You are concise, direct, and "
-                    "clinically precise. Your reports are read by busy "
-                    "clinicians who need clear verdicts and specific "
-                    "action items immediately."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0.2,
-        max_tokens=1200
-    )
-
-    return response.choices[0].message.content
-
+        Keep this under 250 words.
+        Start with the verdict.
+        End with numbered next steps.
+        """
 
 async def run_orchestrator(
     message: str,
