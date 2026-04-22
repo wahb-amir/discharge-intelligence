@@ -377,7 +377,11 @@ async def mcp_post(
                 f"Missing: patient_id={bool(patient_id)} fhir_token={bool(fhir_token)}"
             )
 
-        result = await call_tool(tool_name, patient_id, fhir_token)
+        result = await call_tool(
+            tool_name,
+            {"patient_id": patient_id, "fhir_token": fhir_token},
+            fhir_token
+        )
 
         return {
             "jsonrpc": "2.0",
@@ -443,7 +447,11 @@ async def mcp_tool_call(
             detail="patient_id and fhir_token required",
         )
 
-    result = await call_tool(tool_name, patient_id, fhir_token)
+    result = await call_tool(
+        tool_name,
+        {"patient_id": patient_id, "fhir_token": fhir_token},
+        fhir_token
+    )
     return {
         "tool": tool_name,
         "result": result,
