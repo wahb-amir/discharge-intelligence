@@ -1,3 +1,5 @@
+from typing import Any, Dict, Optional
+
 from mcp.tools.medications import get_patient_medications
 from mcp.tools.labs import get_patient_labs
 from mcp.tools.conditions import get_patient_conditions
@@ -5,8 +7,7 @@ from mcp.tools.vitals import get_patient_vitals
 from mcp.tools.demographics import get_patient_demographics
 from mcp.tools.documents import get_patient_documents
 
-# Tool registry — Prompt Opinion reads this
-# to know what tools your MCP server exposes
+# Tool registry — this is what the prompt/model should see
 MCP_TOOLS = [
     {
         "name": "get_patient_medications",
@@ -17,7 +18,7 @@ MCP_TOOLS = [
                 "patient_id": {"type": "string"},
                 "fhir_token": {"type": "string"}
             },
-            "required": ["patient_id", "fhir_token"]
+            "required": ["patient_id"]
         }
     },
     {
@@ -29,7 +30,7 @@ MCP_TOOLS = [
                 "patient_id": {"type": "string"},
                 "fhir_token": {"type": "string"}
             },
-            "required": ["patient_id", "fhir_token"]
+            "required": ["patient_id"]
         }
     },
     {
@@ -41,7 +42,7 @@ MCP_TOOLS = [
                 "patient_id": {"type": "string"},
                 "fhir_token": {"type": "string"}
             },
-            "required": ["patient_id", "fhir_token"]
+            "required": ["patient_id"]
         }
     },
     {
@@ -53,7 +54,7 @@ MCP_TOOLS = [
                 "patient_id": {"type": "string"},
                 "fhir_token": {"type": "string"}
             },
-            "required": ["patient_id", "fhir_token"]
+            "required": ["patient_id"]
         }
     },
     {
@@ -65,7 +66,7 @@ MCP_TOOLS = [
                 "patient_id": {"type": "string"},
                 "fhir_token": {"type": "string"}
             },
-            "required": ["patient_id", "fhir_token"]
+            "required": ["patient_id"]
         }
     },
     {
@@ -77,16 +78,16 @@ MCP_TOOLS = [
                 "patient_id": {"type": "string"},
                 "fhir_token": {"type": "string"}
             },
-            "required": ["patient_id", "fhir_token"]
+            "required": ["patient_id"]
         }
     }
 ]
 
-# Tool dispatcher
+
 async def call_tool(
     tool_name: str,
-    patient_id: str,
-    fhir_token: str
+    arguments: Dict[str, Any],
+    fhir_token: Optional[str] = None
 ) -> dict:
     tools = {
         "get_patient_medications": get_patient_medications,
@@ -96,8 +97,16 @@ async def call_tool(
         "get_patient_demographics": get_patient_demographics,
         "get_patient_documents": get_patient_documents,
     }
-    
+
     if tool_name not in tools:
         return {"error": f"Unknown tool: {tool_name}"}
-    
-    return await tools[tool_name](patient_id, fhir_token)
+
+    patient_id = arguments.get("patient_id")
+    if not patient_id:
+        return {"error": "Missing required argument: patient_id"}
+
+    token = arguments.get("fhir_token") or fhir_token
+    if not token:
+        return {"error": "Missing required argument: fhir_token"}
+
+    return await tools[tool_name](patient_id, token)
