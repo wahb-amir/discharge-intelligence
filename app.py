@@ -360,7 +360,14 @@ async def mcp_post(
         # patient_id comes from tool arguments
         # fhir_token comes from headers
         patient_id = arguments.get("patient_id") or ""
-        fhir_token = x_fhir_access_token or ""
+        fhir_token = x_fhir_access_token
+
+        if not fhir_token or not fhir_token.strip():
+            return jsonrpc_error(
+                request_id,
+                -32602,
+                "Missing or empty fhir_token"
+            )
         
         # Use FHIR server URL from headers
         if x_fhir_server_url:
