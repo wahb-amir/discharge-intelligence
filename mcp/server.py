@@ -7,11 +7,10 @@ from mcp.tools.vitals import get_patient_vitals
 from mcp.tools.demographics import get_patient_demographics
 from mcp.tools.documents import get_patient_documents
 
-# Tool registry — this is what the prompt/model should see
 MCP_TOOLS = [
     {
         "name": "get_patient_medications",
-        "description": "Fetches all current and historical medications for a patient including dosage and status",
+        "description": "Get a compact medication list for reconciliation",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -23,7 +22,7 @@ MCP_TOOLS = [
     },
     {
         "name": "get_patient_labs",
-        "description": "Fetches recent laboratory results for a patient",
+        "description": "Get recent key lab results in compact form",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -35,7 +34,7 @@ MCP_TOOLS = [
     },
     {
         "name": "get_patient_conditions",
-        "description": "Fetches all active and historical conditions/diagnoses for a patient",
+        "description": "Get the patient’s key conditions in compact form",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -47,7 +46,7 @@ MCP_TOOLS = [
     },
     {
         "name": "get_patient_vitals",
-        "description": "Fetches recent vital signs for a patient",
+        "description": "Get recent vital signs in compact form",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -59,7 +58,7 @@ MCP_TOOLS = [
     },
     {
         "name": "get_patient_demographics",
-        "description": "Fetches patient demographics including name, age, gender, and language",
+        "description": "Get patient demographics",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -71,7 +70,7 @@ MCP_TOOLS = [
     },
     {
         "name": "get_patient_documents",
-        "description": "Fetches clinical documents and notes for a patient",
+        "description": "Get a short list of clinical documents",
         "inputSchema": {
             "type": "object",
             "properties": {
