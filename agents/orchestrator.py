@@ -327,6 +327,20 @@ Keep it under 250 words.
 
     return prompt
 
+def fallback_report(verdict, risk, patient_name):
+    return f"""
+DISCHARGE REPORT — {patient_name}
+
+VERDICT: {verdict}
+RISK: {risk}
+
+⚠️ LLM synthesis failed — using fallback summary.
+
+Next steps:
+1. Review medications
+2. Confirm clinical stability
+3. Ensure follow-up is scheduled
+""".strip()
 
 async def synthesize_report(
     assessments: dict,
@@ -334,34 +348,52 @@ async def synthesize_report(
     risk_level: str,
     patient_name: str
 ) -> str:
-    prompt = build_synthesis_prompt(assessments, verdict, risk_level, patient_name)
+    try:
+        prompt = build_synthesis_prompt(
+            assessments, verdict, risk_level, patient_name
+        )
 
-    print(f"[Orchestrator] synthesis prompt length: {len(prompt)} chars")
+        print(f"[Orchestrator] synthesis prompt length: {len(prompt)} chars")
 
-    response = await asyncio.to_thread(
-        client.chat.completions.create,
-        model=MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a senior hospitalist writing a discharge readiness report. "
-                    "You are concise, direct, and clinically precise. "
-                    "Your reports are read by busy clinicians who need clear verdicts and specific action items immediately."
-                ),
-            },
-            {
-                "role": "user",
-                "content": prompt,
-            },
-        ],
-        temperature=0.2,
-        max_tokens=600,
-    )
+        # ⛑️ HARD TIMEOUT PROTECTION
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                client.chat.completions.create,
+                model=MODEL,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a senior hospitalist writing a discharge readiness report. "
+                            "Be concise, direct, and clinically precise."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt,
+                    },
+                ],
+                temperature=0.2,
+                max_tokens=600,
+            ),
+            timeout=12  # 🔥 critical
+        )
 
-    content = response.choices[0].message.content if response.choices else ""
-    return content or "Unable to generate discharge report."
+        content = (
+            response.choices[0].message.content
+            if response and response.choices
+            else ""
+        )
 
+        return content.strip() or fallback_report(verdict, risk_level, patient_name)
+
+    except asyncio.TimeoutError:
+        print("[ERROR] Groq timeout")
+        return fallback_report(verdict, risk_level, patient_name)
+
+    except Exception as e:
+        print(f"[ERROR] synthesis failed: {e}")
+        return fallback_report(verdict, risk_level, patient_name)
 
 async def run_orchestrator(
     message: str,
