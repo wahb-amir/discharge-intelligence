@@ -6,6 +6,8 @@ from mcp.tools.conditions import get_patient_conditions
 from mcp.tools.vitals import get_patient_vitals
 from mcp.tools.demographics import get_patient_demographics
 from mcp.tools.documents import get_patient_documents
+from agents.orchestrator import run_orchestrator
+
 
 MCP_TOOLS = [
     {
@@ -15,10 +17,10 @@ MCP_TOOLS = [
             "type": "object",
             "properties": {
                 "patient_id": {"type": "string"},
-                "fhir_token": {"type": "string"}
+                "fhir_token": {"type": "string"},
             },
-            "required": ["patient_id"]
-        }
+            "required": ["patient_id"],
+        },
     },
     {
         "name": "get_patient_labs",
@@ -27,10 +29,10 @@ MCP_TOOLS = [
             "type": "object",
             "properties": {
                 "patient_id": {"type": "string"},
-                "fhir_token": {"type": "string"}
+                "fhir_token": {"type": "string"},
             },
-            "required": ["patient_id"]
-        }
+            "required": ["patient_id"],
+        },
     },
     {
         "name": "get_patient_conditions",
@@ -39,10 +41,10 @@ MCP_TOOLS = [
             "type": "object",
             "properties": {
                 "patient_id": {"type": "string"},
-                "fhir_token": {"type": "string"}
+                "fhir_token": {"type": "string"},
             },
-            "required": ["patient_id"]
-        }
+            "required": ["patient_id"],
+        },
     },
     {
         "name": "get_patient_vitals",
@@ -51,10 +53,10 @@ MCP_TOOLS = [
             "type": "object",
             "properties": {
                 "patient_id": {"type": "string"},
-                "fhir_token": {"type": "string"}
+                "fhir_token": {"type": "string"},
             },
-            "required": ["patient_id"]
-        }
+            "required": ["patient_id"],
+        },
     },
     {
         "name": "get_patient_demographics",
@@ -63,10 +65,10 @@ MCP_TOOLS = [
             "type": "object",
             "properties": {
                 "patient_id": {"type": "string"},
-                "fhir_token": {"type": "string"}
+                "fhir_token": {"type": "string"},
             },
-            "required": ["patient_id"]
-        }
+            "required": ["patient_id"],
+        },
     },
     {
         "name": "get_patient_documents",
@@ -75,10 +77,31 @@ MCP_TOOLS = [
             "type": "object",
             "properties": {
                 "patient_id": {"type": "string"},
-                "fhir_token": {"type": "string"}
+                "fhir_token": {"type": "string"},
             },
-            "required": ["patient_id"]
-        }
+            "required": ["patient_id"],
+        },
+    },
+]
+
+# Separate tool definition for LLM tool-calling (OpenAI/Groq-style).
+LLM_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "run_discharge_orchestrator",
+            "description": "Run full discharge readiness assessment for the current patient",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "patient_id": {
+                        "type": "string",
+                        "description": "FHIR patient ID",
+                    }
+                },
+                "required": ["patient_id"],
+            },
+        },
     }
 ]
 
@@ -86,7 +109,7 @@ MCP_TOOLS = [
 async def call_tool(
     tool_name: str,
     arguments: Dict[str, Any],
-    fhir_token: Optional[str] = None
+    fhir_token: Optional[str] = None,
 ) -> dict:
     tools = {
         "get_patient_medications": get_patient_medications,
@@ -96,6 +119,23 @@ async def call_tool(
         "get_patient_demographics": get_patient_demographics,
         "get_patient_documents": get_patient_documents,
     }
+
+    # Orchestrator is handled separately.
+    if tool_name == "run_discharge_orchestrator":
+        patient_id = arguments.get("patient_id")
+        if not patient_id:
+            return {"error": "Missing required argument: patient_id"}
+
+        token = arguments.get("fhir_token") or fhir_token
+        if not token:
+            return {"error": "Missing required argument: fhir_token"}
+
+        # Adjust this call if your orchestrator signature differs.
+        return {"result": await run_orchestrator(
+            message="Assess discharge readiness",
+            patient_id=patient_id,
+            fhir_token=token,
+        )}
 
     if tool_name not in tools:
         return {"error": f"Unknown tool: {tool_name}"}
