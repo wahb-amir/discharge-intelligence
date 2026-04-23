@@ -84,7 +84,7 @@ MCP_TOOLS = [
     },
 ]
 
-# Separate tool definition for LLM tool-calling (OpenAI/Groq-style).
+# Separate tool definition for LLM tool-calling.
 LLM_TOOLS = [
     {
         "type": "function",
@@ -111,6 +111,23 @@ async def call_tool(
     arguments: Dict[str, Any],
     fhir_token: Optional[str] = None,
 ) -> dict:
+    patient_id = arguments.get("patient_id")
+    if not patient_id:
+        return {"error": "Missing required argument: patient_id"}
+
+    token = arguments.get("fhir_token") or fhir_token
+
+    if tool_name == "run_discharge_orchestrator":
+        if not token:
+            return {"error": "Missing required argument: fhir_token"}
+
+        result = await run_orchestrator(
+            message="Assess discharge readiness",
+            patient_id=patient_id,
+            fhir_token=token,
+        )
+        return {"result": result}
+
     tools = {
         "get_patient_medications": get_patient_medications,
         "get_patient_labs": get_patient_labs,
@@ -120,31 +137,9 @@ async def call_tool(
         "get_patient_documents": get_patient_documents,
     }
 
-    # Orchestrator is handled separately.
-    if tool_name == "run_discharge_orchestrator":
-        patient_id = arguments.get("patient_id")
-        if not patient_id:
-            return {"error": "Missing required argument: patient_id"}
-
-        token = arguments.get("fhir_token") or fhir_token
-        if not token:
-            return {"error": "Missing required argument: fhir_token"}
-
-        # Adjust this call if your orchestrator signature differs.
-        return {"result": await run_orchestrator(
-            message="Assess discharge readiness",
-            patient_id=patient_id,
-            fhir_token=token,
-        )}
-
     if tool_name not in tools:
         return {"error": f"Unknown tool: {tool_name}"}
 
-    patient_id = arguments.get("patient_id")
-    if not patient_id:
-        return {"error": "Missing required argument: patient_id"}
-
-    token = arguments.get("fhir_token") or fhir_token
     if not token:
         return {"error": "Missing required argument: fhir_token"}
 
