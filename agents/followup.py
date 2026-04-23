@@ -79,6 +79,8 @@ COORDINATION NOTES:
                 "content": prompt
             }
         ],
+        tools=LLM_TOOLS,              
+        tool_choice="auto", 
         temperature=0.2,
         max_tokens=800
     )

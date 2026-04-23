@@ -85,6 +85,8 @@ Keep the tone warm and reassuring.
                 "content": prompt
             }
         ],
+        tools=LLM_TOOLS,              
+        tool_choice="auto", 
         temperature=0.3,
         max_tokens=1000
     )

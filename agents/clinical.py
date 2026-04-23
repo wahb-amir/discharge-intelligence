@@ -91,6 +91,8 @@ CLINICAL NOTES:
                 "content": prompt
             }
         ],
+        tools=LLM_TOOLS,              
+        tool_choice="auto", 
         temperature=0.1,
         max_tokens=1000
     )

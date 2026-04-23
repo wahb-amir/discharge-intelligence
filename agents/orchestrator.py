@@ -1,6 +1,6 @@
 import os
 import asyncio
-from typing import Any, Dict
+from typing import Any
 
 from groq import Groq
 from dotenv import load_dotenv
@@ -19,13 +19,18 @@ from agents.education import run_education_agent
 
 load_dotenv()
 
-client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+if not GROQ_API_KEY:
+    raise RuntimeError("GROQ_API_KEY is not set")
+
+client = Groq(api_key=GROQ_API_KEY)
 MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 MAX_LIST_ITEMS = 8
 MAX_TEXT_CHARS = 700
-MAX_SYNTHESIS_PROMPT_CHARS = 12000
+MAX_SYNTHESIS_PROMPT_CHARS = 6000
 MAX_FINAL_INSTRUCTIONS_CHARS = 1200
+SYNTHESIS_TIMEOUT_SECONDS = 30
 
 
 def clip_text(text: Any, limit: int = MAX_TEXT_CHARS) -> str:
@@ -52,6 +57,7 @@ def compact_assessment(a: dict) -> dict:
             "required_appointments": [],
             "notes": "Invalid assessment payload",
             "summary": "Invalid assessment payload",
+            "patient_instructions": "",
         }
 
     return {
@@ -106,11 +112,6 @@ async def fetch_all_patient_data(
     fhir_token: str,
     fhir_server_url: str | None = None
 ) -> dict:
-    """
-    Fetch all FHIR data in parallel.
-    Uses fhir_server_url from Prompt Opinion if provided,
-    otherwise falls back to env variable.
-    """
     if fhir_server_url:
         os.environ["FHIR_BASE_URL"] = fhir_server_url
         print(f"[Orchestrator] Using FHIR server: {fhir_server_url}")
@@ -152,10 +153,6 @@ async def run_all_specialist_agents(
     fhir_token: str,
     data: dict
 ) -> dict:
-    """
-    Run all 4 specialist agents in parallel.
-    Each gets compacted data to keep prompts small.
-    """
     safe_data = compact_patient_data_for_agents(data)
 
     results = await asyncio.gather(
@@ -221,10 +218,6 @@ async def run_all_specialist_agents(
 
 
 def determine_verdict(assessments: dict) -> tuple[str, str]:
-    """
-    Determines final discharge verdict and risk level
-    based on all specialist assessments.
-    """
     med = assessments["medication"]
     clinical = assessments["clinical"]
     followup = assessments["followup"]
@@ -327,7 +320,8 @@ Keep it under 250 words.
 
     return prompt
 
-def fallback_report(verdict, risk, patient_name):
+
+def fallback_report(verdict: str, risk: str, patient_name: str) -> str:
     return f"""
 DISCHARGE REPORT — {patient_name}
 
@@ -342,6 +336,7 @@ Next steps:
 3. Ensure follow-up is scheduled
 """.strip()
 
+
 async def synthesize_report(
     assessments: dict,
     verdict: str,
@@ -354,8 +349,8 @@ async def synthesize_report(
         )
 
         print(f"[Orchestrator] synthesis prompt length: {len(prompt)} chars")
+        print("[Orchestrator] Starting Groq synthesis...")
 
-        # ⛑️ HARD TIMEOUT PROTECTION
         response = await asyncio.wait_for(
             asyncio.to_thread(
                 client.chat.completions.create,
@@ -376,15 +371,12 @@ async def synthesize_report(
                 temperature=0.2,
                 max_tokens=600,
             ),
-            timeout=12  # 🔥 critical
+            timeout=SYNTHESIS_TIMEOUT_SECONDS,
         )
 
-        content = (
-            response.choices[0].message.content
-            if response and response.choices
-            else ""
-        )
+        print("[Orchestrator] Groq synthesis completed")
 
+        content = response.choices[0].message.content if response and response.choices else ""
         return content.strip() or fallback_report(verdict, risk_level, patient_name)
 
     except asyncio.TimeoutError:
@@ -395,22 +387,13 @@ async def synthesize_report(
         print(f"[ERROR] synthesis failed: {e}")
         return fallback_report(verdict, risk_level, patient_name)
 
+
 async def run_orchestrator(
     message: str,
     patient_id: str,
     fhir_token: str,
     fhir_server_url: str | None = None
 ) -> str:
-    """
-    Main orchestrator function.
-    This is what Prompt Opinion calls via A2A.
-
-    Flow:
-    1. Fetch all FHIR data in parallel
-    2. Run all specialist agents in parallel
-    3. Determine verdict
-    4. Synthesize final report
-    """
     if not patient_id or not str(fhir_token).strip():
         return (
             "Unable to perform discharge assessment: "
@@ -441,6 +424,7 @@ async def run_orchestrator(
         fhir_token,
         patient_data,
     )
+
     print("[Orchestrator] All specialist agents completed")
     print(f"[Orchestrator] Medication: {assessments['medication'].get('status')}")
     print(f"[Orchestrator] Clinical: {assessments['clinical'].get('status')}")
@@ -468,6 +452,7 @@ async def run_orchestrator(
 
 PATIENT DISCHARGE INSTRUCTIONS:
 {patient_instructions}
-"""
+""".strip()
 
+    print("[Orchestrator] Completed successfully")
     return final_output
